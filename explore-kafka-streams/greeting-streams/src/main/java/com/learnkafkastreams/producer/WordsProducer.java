@@ -11,7 +11,7 @@ public class WordsProducer {
 
     public static void main(String[] args) throws InterruptedException {
 
-        var key = "A";
+        String key = null;
 
         var word = "Apple";
         var word1 = "Alligator";

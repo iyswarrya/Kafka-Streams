@@ -26,15 +26,15 @@ public class OrdersMockDataProducer {
                 .registerModule(new JavaTimeModule())
                 .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
 
-        publishOrders(objectMapper, buildOrders());
+        //publishOrders(objectMapper, buildOrders());
         //publishBulkOrders(objectMapper);
 
         //grace-period
 //        publishOrdersForGracePeriod(objectMapper, buildOrders());
 
         //Future and Old Records
-//        publishFutureRecords(objectMapper);
-//        publishExpiredRecords(objectMapper);
+  //      publishFutureRecords(objectMapper);
+        publishExpiredRecords(objectMapper);
 
 
     }
@@ -248,7 +248,7 @@ public class OrdersMockDataProducer {
                 .forEach(order -> {
                     try {
                         var ordersJSON = objectMapper.writeValueAsString(order);
-                        var recordMetaData = publishMessageSync(OrdersTopology.ORDERS, order.orderId() + "", ordersJSON);
+                        var recordMetaData = publishMessageSync(OrdersTopology.ORDERS, null + "", ordersJSON);
                         log.info("Published the order message : {} ", recordMetaData);
                     } catch (JsonProcessingException e) {
                         log.error("JsonProcessingException : {} ", e.getMessage(), e);
@@ -259,6 +259,5 @@ public class OrdersMockDataProducer {
                     }
                 });
     }
-
 
 }

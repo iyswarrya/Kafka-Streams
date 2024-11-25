@@ -1,9 +1,219 @@
 package com.learnkafkastreams.topology;
 
+import com.learnkafkastreams.domain.*;
+import com.learnkafkastreams.serdes.SerdesFactory;
+import com.learnkafkastreams.util.OrderTimeStampExtractor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.utils.Bytes;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.kstream.*;
+import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.WindowStore;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Slf4j
 public class OrdersTopology {
     public static final String ORDERS = "orders";
+    public static final String GENERAL_ORDERS = "general_orders";
+    public static final String GENERAL_ORDERS_COUNT = "general_orders_count";
+    public static final String GENERAL_ORDERS_COUNT_WINDOW = "general_orders_count_window";
+    public static final String GENERAL_ORDERS_REVENUE = "general_orders_revenue";
+    public static final String GENERAL_ORDERS_REVENUE_WINDOW = "general_orders_revenue_window";
+    public static final String RESTAURANT_ORDERS = "restaurant_orders";
+    public static final String RESTAURANT_ORDERS_COUNT = "restaurant_orders_count";
+    public static final String RESTAURANT_ORDERS_COUNT_WINDOW = "restaurant_orders_count_window";
+    public static final String RESTAURANT_ORDERS_REVENUE = "restaurant_orders_revenue";
+    public static final String RESTAURANT_ORDERS_REVENUE_WINDOW = "restaurant_orders_revenue_window";
     public static final String STORES = "stores";
+
+    public Topology buildTopology() {
+        //general predicate if the order type is general
+        Predicate<String, Order> generalPredicate = (key, order)-> order.orderType().equals(OrderType.GENERAL);
+        //restaurant predicate if the order type is restaurant
+        Predicate<String, Order> restaurantPredicate = (key, order) -> order.orderType().equals(OrderType.RESTAURANT);
+        ValueMapper<Order, Revenue> revenueMapper = (order) -> new Revenue(order.locationId(), order.finalAmount());
+        StreamsBuilder streamsBuilder = new StreamsBuilder();
+
+        var ordersStream = streamsBuilder
+                //consume the data stream and publish to the topic ORDERS
+                .stream(ORDERS, Consumed.with(Serdes.String(), SerdesFactory.orderSerde())
+                        .withTimestampExtractor(new OrderTimeStampExtractor()))
+                .selectKey(((key, value) -> value.locationId()));
+
+        ordersStream.print(Printed.<String, Order>toSysOut().withLabel("orders"));
+
+        //KStream-KTable join for adding the store address to the total revenue
+        //stores is a KTable since there is no changing data
+        var storesTable = streamsBuilder
+                .table(STORES,
+                        Consumed.with(Serdes.String(), SerdesFactory.storeSerde()));
+
+        //split the order stream based on order type - general and restaurant
+        ordersStream
+                .split(Named.as("General-restaurant-stream"))
+                //make two branches based on the result of the Predicate (whether general or restaurant order type)
+                .branch(generalPredicate, Branched.withConsumer(generalOrderStream -> {
+                    //print the general order stream - for debugging purpose
+                    generalOrderStream.print(Printed.<String, Order>toSysOut().withLabel("generalOrderStream"));
+//                    generalOrderStream
+//                            .mapValues((key, value) -> revenueMapper.apply(value))
+//                            .to(GENERAL_ORDERS,
+//                            Produced.with(Serdes.String(), SerdesFactory.revenueSerde()));
+                    //aggregateOrderByCount(generalOrderStream, GENERAL_ORDERS_COUNT);
+                    aggregateOrderByCountByTimeWindows(generalOrderStream, GENERAL_ORDERS_COUNT_WINDOW, storesTable);
+                    //aggregateOrderByRevenue(generalOrderStream, GENERAL_ORDERS_REVENUE, storesTable);
+                    aggregateOrderByRevenueByTimeWindows(generalOrderStream, GENERAL_ORDERS_REVENUE_WINDOW, storesTable);
+                }))
+
+                .branch(restaurantPredicate, Branched.withConsumer(restaurantOrderStream -> {
+                    //print the restaurant order stream
+                    restaurantOrderStream.print(Printed.<String, Order>toSysOut().withLabel("restaurantOrderStream"));
+//                    restaurantOrderStream
+//                            .mapValues((key, value) -> revenueMapper.apply(value))
+//                            .to(RESTAURANT_ORDERS,
+//                            Produced.with(Serdes.String(), SerdesFactory.revenueSerde()));
+                    //aggregateOrderByCount(restaurantOrderStream, RESTAURANT_ORDERS_COUNT);
+                    aggregateOrderByCountByTimeWindows(restaurantOrderStream, RESTAURANT_ORDERS_COUNT_WINDOW, storesTable);
+                    //aggregateOrderByRevenue(restaurantOrderStream, RESTAURANT_ORDERS_REVENUE, storesTable);
+                    aggregateOrderByRevenueByTimeWindows(restaurantOrderStream, RESTAURANT_ORDERS_REVENUE_WINDOW, storesTable);
+                }));
+
+        return streamsBuilder.build();
+    }
+
+    private void aggregateOrderByRevenueByTimeWindows(KStream<String, Order> generalOrderStream, String storeName, KTable<String, Store> storesTable) {
+        Duration windowSize = Duration.ofSeconds(15);
+
+        TimeWindows timeWindows = TimeWindows.ofSizeWithNoGrace(windowSize);
+
+        Initializer<TotalRevenue> totalRevenueInitializer =
+                TotalRevenue::new;
+
+        Aggregator<String, Order, TotalRevenue> aggregator =
+                (((key, value, aggregate) -> aggregate.updateRunningRevenue(key, value)));
+
+
+        var revenueTable = generalOrderStream
+                //change the key to locationId by .map and .groupby since the original key was orderId
+                .map((key, value) -> KeyValue.pair(value.locationId(), value))
+                .groupByKey(Grouped.with(Serdes.String(), SerdesFactory.orderSerde()))
+                .windowedBy(timeWindows)
+                .aggregate(totalRevenueInitializer,
+                        aggregator,
+                        Materialized.<String, TotalRevenue, WindowStore<Bytes, byte[]>>
+                                        as(storeName)
+                                .withKeySerde(Serdes.String())
+                                .withValueSerde(SerdesFactory.totalRevenueSerde())
+                );
+
+        revenueTable
+                .toStream()
+                .peek(((key, value) -> {
+                    log.info("Store name : {} key : {} value : {}", storeName, key, value);
+                    printLocalDateTimes(key, value);
+                }))
+                .print(Printed.<Windowed<String>, TotalRevenue>toSysOut().withLabel(storeName));
+
+
+        //KStream-KStream join
+        ValueJoiner<TotalRevenue, Store, TotalRevenueWithAddress> valueJoiner = TotalRevenueWithAddress::new;
+
+        var joinedParams =
+                Joined.with(Serdes.String(), SerdesFactory.totalRevenueSerde(), SerdesFactory.storeSerde());
+
+        revenueTable
+                //since key became windowed string, perform map to convert to string
+                .toStream()
+                .map((key, value) -> KeyValue.pair(key.key(), value))
+                .join(storesTable, valueJoiner, joinedParams)
+                .print(Printed.<String, TotalRevenueWithAddress>toSysOut().withLabel(storeName+"-bystore"));
+//
+//        revenueWithStoreTable.toStream()
+//                .print(Printed.<String, TotalRevenueWithAddress>toSysOut().withLabel(storeName+"-bystore"));
+
+
+    }
+
+    private void aggregateOrderByRevenue(KStream<String, Order> generalOrderStream, String storeName, KTable<String, Store> storesTable) {
+        Initializer<TotalRevenue> totalRevenueInitializer =
+                TotalRevenue::new;
+
+        Aggregator<String, Order, TotalRevenue> aggregator =
+                (((key, value, aggregate) -> aggregate.updateRunningRevenue(key, value)));
+
+
+        var revenueTable = generalOrderStream
+                //change the key to locationId by .map and .groupby since the original key was orderId
+                .map((key, value) -> KeyValue.pair(value.locationId(), value))
+                .groupByKey(Grouped.with(Serdes.String(), SerdesFactory.orderSerde()))
+                .aggregate(totalRevenueInitializer,
+                        aggregator,
+                        Materialized.<String, TotalRevenue, KeyValueStore<Bytes, byte[]>>
+                                        as(storeName)
+                                .withKeySerde(Serdes.String())
+                                .withValueSerde(SerdesFactory.totalRevenueSerde())
+                );
+
+
+        //KStream-KStream join
+        ValueJoiner<TotalRevenue, Store, TotalRevenueWithAddress> valueJoiner = TotalRevenueWithAddress::new;
+        var revenueWithStoreTable = revenueTable.join(storesTable, valueJoiner);
+
+        revenueWithStoreTable.toStream()
+                .print(Printed.<String, TotalRevenueWithAddress>toSysOut().withLabel(storeName+"-bystore"));
+
+
+    }
+
+    private void aggregateOrderByCount(KStream<String, Order> generalOrderStream, String storeName) {
+        var orderCountPerStore = generalOrderStream
+                .map((key, value) -> KeyValue.pair(value.locationId(), value))
+                .groupByKey(Grouped.with(Serdes.String(), SerdesFactory.orderSerde()))
+                .count(Named.as(storeName), Materialized.as(storeName));
+
+        orderCountPerStore
+                .toStream()
+                .print(Printed.<String, Long>toSysOut().withLabel(storeName));
+    }
+
+    private void aggregateOrderByCountByTimeWindows(KStream<String, Order> generalOrderStream, String storeName, KTable<String, Store> storesTable) {
+
+        Duration windowSize = Duration.ofSeconds(15);
+
+        TimeWindows timeWindows = TimeWindows.ofSizeWithNoGrace(windowSize);
+
+        var orderCountPerStore = generalOrderStream
+                .map((key, value) -> KeyValue.pair(value.locationId(), value))
+                .groupByKey(Grouped.with(Serdes.String(), SerdesFactory.orderSerde()))
+                .windowedBy(timeWindows)
+                .count(Named.as(storeName), Materialized.as(storeName))
+                .suppress(Suppressed.untilWindowCloses(Suppressed.BufferConfig.unbounded()
+                                .shutDownWhenFull())
+                );
+
+        orderCountPerStore
+                .toStream()
+                .peek(((key, value) -> {
+                    log.info("Store name : {} key : {} value : {}", storeName, key, value);
+                    printLocalDateTimes(key, value);
+                }))
+                .print(Printed.<Windowed<String>, Long>toSysOut().withLabel(storeName));
+    }
+
+    private static void printLocalDateTimes(Windowed<String> key, Object value) {
+        var startTime = key.window().startTime();
+        var endTime = key.window().endTime();
+
+        LocalDateTime startLDT = LocalDateTime.ofInstant(startTime, ZoneId.of(ZoneId.SHORT_IDS.get("PST")));
+        LocalDateTime endLDT = LocalDateTime.ofInstant(endTime, ZoneId.of(ZoneId.SHORT_IDS.get("PST")));
+        log.info("startLDT : {} , endLDT : {}, Count : {}", startLDT, endLDT, value);
+    }
+
+
 }
