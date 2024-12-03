@@ -110,3 +110,8 @@ curl -i http://localhost:8080/v1/orders/windows/revenue/general_orders
 
 Sample JSON: 06-orders-revenue-windows.json
 DTO : OrdersRevenuePerStoreByWindows
+
+
+
+curl -i http://localhost:8080/v1/metadata/all
+

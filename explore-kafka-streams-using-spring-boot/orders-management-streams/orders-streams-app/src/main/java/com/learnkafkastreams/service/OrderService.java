@@ -1,10 +1,14 @@
 package com.learnkafkastreams.service;
 
 import com.learnkafkastreams.domain.*;
+import com.learnkafkastreams.producer.MetaDataService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Spliterators;
@@ -21,12 +25,17 @@ import static com.learnkafkastreams.topology.OrdersTopology.*;
 public class OrderService {
 
     private OrderStoreService orderStoreService;
+    private MetaDataService metaDataService;
 
-    public OrderService(OrderStoreService orderStoreService) {
+    @Value("${server.port}")
+    private Integer port;
+
+    public OrderService(OrderStoreService orderStoreService, MetaDataService metaDataService) {
         this.orderStoreService = orderStoreService;
+        this.metaDataService = metaDataService;
     }
 
-    public List<OrderCountPerStoreDTO> getOrdersCount(String orderType) {
+    public List<OrderCountPerStoreDTO> getOrdersCount(String orderType) throws UnknownHostException {
         //access the state store and get the order count for each store based on order type
         var ordersCountStore = getOrderStore(orderType);
         var orders = ordersCountStore.all();//gives an iterator for iterating through all the keys returned
@@ -34,12 +43,42 @@ public class OrderService {
         //iterate the records one by one and map it to a list of OrderCountPerStoreDTO
         var spliterator = Spliterators.spliteratorUnknownSize(orders, 0);
 
+        //fetch the metadata about other instances
+        //make rest call to get the data from other instance
+            //make sure the other instance is not going to make any network call to other instances-other goes in loops
+        //aggregate the data
+        retrieveDataFromOtherInstances(orderType);
+
+
         //create a new stream from spliterator
         return StreamSupport.stream(spliterator, false)
                 //convert from keyValue type to OrderCountPerStoreDTO
                 .map(keyValue -> new OrderCountPerStoreDTO(keyValue.key, keyValue.value))
                 .collect(Collectors.toList());
 
+    }
+
+    private void retrieveDataFromOtherInstances(String orderType) throws UnknownHostException {
+        var otherHosts = otherHosts();
+        log.info("otherHosts: {}", otherHosts);
+
+        if(otherHosts != null && !otherHosts.isEmpty()) {
+
+        }
+    }
+
+    private List<HostInfoDTO> otherHosts() throws java.net.UnknownHostException {
+        try {
+            var currentMachineAddress = InetAddress.getLocalHost().getHostAddress();
+            return metaDataService.getStreamsMetaData()
+                    .stream()
+                    .filter(hostInfoDTO -> hostInfoDTO.port() != port)
+                    .collect(Collectors.toList());
+        }
+        catch (UnknownHostException e) {
+            log.error("Exception in other hosts: {}", e.getMessage(), e);
+        }
+        return null;
     }
 
     public ReadOnlyKeyValueStore<String, Long> getOrderStore(String orderType) {

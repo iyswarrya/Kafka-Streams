@@ -27,8 +27,8 @@ public class OrdersMockDataProducer {
                 .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
 
 
-        //publishOrders(objectMapper, buildOrders());
-        publishBulkOrders(objectMapper);
+        publishOrders(objectMapper, buildOrders());
+        //publishBulkOrders(objectMapper);
 
         /**
          * To test grace period.
@@ -208,7 +208,7 @@ public class OrdersMockDataProducer {
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
-        var order2 = new Order(54321, "store_1234",
+        var order2 = new Order(100, "store_1234",
                 new BigDecimal("15.00"),
                 OrderType.RESTAURANT,
                 orderItemsRestaurant,
@@ -225,7 +225,7 @@ public class OrdersMockDataProducer {
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
-        var order4 = new Order(12345, "store_4567",
+        var order4 = new Order(100, "store_4567",
                 new BigDecimal("27.00"),
                 OrderType.RESTAURANT,
                 orderItems,
@@ -257,7 +257,7 @@ public class OrdersMockDataProducer {
                 new BigDecimal("27.00"),
                 OrderType.GENERAL,
                 orderItems,
-                LocalDateTime.parse("2023-02-27T08:45:58")
+                LocalDateTime.parse("2024-12-01T15:14:58")
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
@@ -265,7 +265,7 @@ public class OrdersMockDataProducer {
                 new BigDecimal("15.00"),
                 OrderType.RESTAURANT,
                 orderItemsRestaurant,
-                LocalDateTime.parse("2023-02-27T08:45:58")
+                LocalDateTime.parse("2024-12-01T15:14:58")
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
@@ -274,7 +274,7 @@ public class OrdersMockDataProducer {
                 OrderType.GENERAL,
                 orderItems,
                 //LocalDateTime.now()
-                LocalDateTime.parse("2023-02-27T08:45:58")
+                LocalDateTime.parse("2024-12-01T15:14:58")
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
@@ -283,7 +283,7 @@ public class OrdersMockDataProducer {
                 OrderType.RESTAURANT,
                 orderItems,
                 //LocalDateTime.now()
-                LocalDateTime.parse("2023-02-27T08:45:58")
+                LocalDateTime.parse("2024-12-01T15:14:58")
                 //LocalDateTime.now(ZoneId.of("UTC"))
         );
 
