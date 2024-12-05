@@ -7,7 +7,6 @@ import com.learnkafkastreams.domain.OrderLineItem;
 import com.learnkafkastreams.domain.OrderType;
 import com.learnkafkastreams.service.OrderService;
 import com.learnkafkastreams.service.OrdersWindowService;
-import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.KeyValue;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
@@ -17,21 +16,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.config.StreamsBuilderFactoryBean;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import static com.learnkafkastreams.topology.OrdersTopology.*;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -79,7 +75,7 @@ public class OrdersTopologyIntegrationTest {
     }
 
     @Test
-    void ordersCount(){
+    void ordersCount() throws UnknownHostException {
         //given
         publishOrders();
         //the operations are asynchronously executed in the integration test
@@ -87,9 +83,9 @@ public class OrdersTopologyIntegrationTest {
         Awaitility.await().atMost(60, TimeUnit.SECONDS)
                 .pollDelay(Duration.ofSeconds(1))
                 .ignoreExceptions()
-                .until(() ->orderService.getOrdersCount(GENERAL_ORDERS).size(), equalTo(1));
+                .until(() ->orderService.getOrdersCount(GENERAL_ORDERS, "false").size(), equalTo(1));
 
-        var generalOrdersCount = orderService.getOrdersCount(GENERAL_ORDERS);
+        var generalOrdersCount = orderService.getOrdersCount(GENERAL_ORDERS, "false");
         assertEquals(1, generalOrdersCount.get(0).orderCount());
     }
 

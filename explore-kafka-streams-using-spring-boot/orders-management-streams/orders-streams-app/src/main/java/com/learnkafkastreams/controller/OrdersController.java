@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.UnknownHostException;
 import java.util.List;
 
 @RestController
@@ -25,7 +26,12 @@ public class OrdersController {
     // order count for the store locations based on the order type(whether general or restaurant)
     public ResponseEntity<?> orderCount(
             @PathVariable("order_type") String orderType,
-            @RequestParam(value = "location_id", required = false) String locationId) {
+            @RequestParam(value = "location_id", required = false) String locationId,
+            @RequestParam(value="query_other_hosts", required = false) String queryOtherHosts) throws UnknownHostException {
+
+        if(!StringUtils.hasText(queryOtherHosts)){
+            queryOtherHosts = "true";
+        }
 
         //call this method if location_id is in the URI and return the
         // the orderCountDTO only for that locationId
@@ -35,11 +41,11 @@ public class OrdersController {
 
         //return the order count in the form of java object by building a mapper function that
         //converts the data in the state store to order count DTO
-        return ResponseEntity.ok(orderService.getOrdersCount(orderType));
+        return ResponseEntity.ok(orderService.getOrdersCount(orderType, queryOtherHosts));
     }
 
     @GetMapping("/count")
-    public List<AllOrdersCountPerStoreDTO> getAllOrdersCountPerStore(){
+    public List<AllOrdersCountPerStoreDTO> getAllOrdersCountPerStore() throws UnknownHostException {
         return orderService.getAllOrdersCount();
     }
 
